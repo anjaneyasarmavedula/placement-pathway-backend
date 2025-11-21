@@ -51,6 +51,11 @@ const StudentSchema = new mongoose.Schema(
     // RESUME FILE STORAGE
     resumeUrl: { type: String, default: "" },         // For Cloudinary/S3 URL
     resumeFileName: { type: String, default: "" },
+    resumeLink: { type: String, default: "" },        // For Google Drive/External Link
+
+    // PASSWORD RESET
+    resetPasswordToken: { type: String },
+    resetPasswordExpires: { type: Date },
 
   },
   { timestamps: true }

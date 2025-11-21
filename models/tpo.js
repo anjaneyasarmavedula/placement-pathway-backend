@@ -7,6 +7,8 @@ const TPOSchema = new mongoose.Schema(
     password: { type: String, required: true },
     role: { type: String, default: 'tpo' },
     verified: { type: Boolean, default: false },
+    resetPasswordToken: { type: String },
+    resetPasswordExpires: { type: Date },
   },
   { timestamps: true }
 );

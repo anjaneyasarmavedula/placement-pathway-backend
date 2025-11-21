@@ -3,7 +3,8 @@ const mongoose = require('mongoose');
 const ApplicationSchema = new mongoose.Schema(
   {
     student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
-    company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
+    company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' }, // Optional
+    companyName: { type: String }, // For TPO jobs
     opportunityId: { type: String, required: true }, // or ObjectId if you have an Opportunity model
     position: { type: String, required: true },
     resumeUrl: { type: String },

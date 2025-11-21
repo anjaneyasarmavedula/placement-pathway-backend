@@ -102,6 +102,92 @@ app.post("/register", async (req, res) => {
   }
 });
 
+const crypto = require('crypto');
+const sendEmail = require('./utils/email');
+
+// Forgot Password
+app.post('/forgot-password', async (req, res) => {
+  const { email, type } = req.body;
+  try {
+    let user;
+    if (type === 'student') user = await Student.findOne({ email });
+    else if (type === 'company' || type === 'recruiter') user = await Company.findOne({ email });
+    else if (type === 'tpo') user = await TPO.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Generate token
+    const resetToken = crypto.randomBytes(20).toString('hex');
+    user.resetPasswordToken = resetToken;
+    user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
+
+    await user.save();
+
+    // Send email
+    const resetUrl = `http://localhost:8080/reset-password?token=${resetToken}&type=${type}`;
+    
+    const message = `
+      <h1>You have requested a password reset</h1>
+      <p>Please go to this link to reset your password:</p>
+      <a href="${resetUrl}" clicktracking=off>${resetUrl}</a>
+    `;
+
+    try {
+      await sendEmail({
+        to: user.email,
+        subject: 'Password Reset Request',
+        html: message,
+      });
+
+      res.status(200).json({ success: true, data: 'Email sent' });
+    } catch (err) {
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpires = undefined;
+      await user.save();
+      return res.status(500).json({ message: 'Email could not be sent' });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server Error' });
+  }
+});
+
+// Reset Password
+app.post('/reset-password', async (req, res) => {
+  const { resetToken, newPassword, type } = req.body;
+
+  try {
+    let user;
+    // Find user with token and check expiry
+    const query = {
+      resetPasswordToken: resetToken,
+      resetPasswordExpires: { $gt: Date.now() },
+    };
+
+    if (type === 'student') user = await Student.findOne(query);
+    else if (type === 'company' || type === 'recruiter') user = await Company.findOne(query);
+    else if (type === 'tpo') user = await TPO.findOne(query);
+
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid Token' });
+    }
+
+    // Update password
+    user.password = await bcrypt.hash(newPassword, 10);
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+
+    await user.save();
+
+    res.status(200).json({ success: true, data: 'Password Updated Success' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server Error' });
+  }
+});
+
 
 app.post('/login', async (req, res) => {
   try {
@@ -228,6 +314,7 @@ app.post('/student/profile', authenticate, async (req, res) => {
       certifications,
       resumeUrl,
       resumeFileName,
+      resumeLink,
     } = req.body;
 
     // Build update object only with provided fields
@@ -275,6 +362,7 @@ app.post('/student/profile', authenticate, async (req, res) => {
 
     if (resumeUrl) update.resumeUrl = resumeUrl;
     if (resumeFileName) update.resumeFileName = resumeFileName;
+    if (resumeLink) update.resumeLink = resumeLink;
 
     update.updatedAt = Date.now();
 
@@ -303,9 +391,13 @@ app.post('/student/profile/upload', authenticate, upload.single('file'), async (
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
     // Upload to Cloudinary
+    const path = require('path');
+    const ext = path.extname(req.file.originalname).substring(1);
     const result = await cloudinary.uploader.upload(req.file.path, {
       folder: 'placement-resumes',
       resource_type: 'auto',
+      format: ext,
+      use_filename: true,
     });
 
     // Save to student profile
@@ -350,28 +442,36 @@ app.post('/student/apply', authenticate, async (req, res) => {
     const userId = req.user && req.user.id;
     if (!userId) return res.status(401).json({ message: 'Unauthorized' });
     const { opportunityId, companyId, position, additionalInfo } = req.body;
-    if (!opportunityId || !companyId || !position) {
+    if (!opportunityId || !position) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
     // Check constraints
     const opp = await Opportunity.findById(opportunityId);
     const student = await Student.findById(userId);
     if (!opp || !student) return res.status(404).json({ message: 'Not found' });
-    // REMOVE ALL CONSTRAINTS: allow any student to apply
+    
     // Optionally, check if already applied
     const existing = await Application.findOne({ student: userId, opportunityId });
     if (existing) {
       return res.status(409).json({ message: 'Already applied to this opportunity' });
     }
     const resumeUrl = student?.resumeUrl || '';
-    const appDoc = new Application({
+    
+    const appData = {
       student: userId,
-      company: companyId,
       opportunityId,
       position,
       resumeUrl,
       additionalInfo,
-    });
+    };
+
+    if (companyId) {
+      appData.company = companyId;
+    } else if (opp.companyName) {
+      appData.companyName = opp.companyName;
+    }
+
+    const appDoc = new Application(appData);
     await appDoc.save();
     res.status(201).json({ message: 'Application submitted', application: appDoc });
   } catch (err) {
@@ -486,7 +586,34 @@ app.post('/tpo/verify-student/:id', authenticate, async (req, res) => {
 });
 
 // Company creates a new job posting
-// app.post('/company/opportunities', authenticate,
+app.post('/company/opportunities', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'recruiter') return res.status(403).json({ message: 'Forbidden' });
+    const { title, role, package: jobPackage, description, location, deadline, minGpa, department, skills } = req.body;
+    
+    const opportunity = new Opportunity({
+      company: req.user.id,
+      postedBy: 'company',
+      creatorId: req.user.id,
+      title,
+      role,
+      package: jobPackage,
+      description,
+      location,
+      deadline,
+      minGpa,
+      department,
+      skills
+    });
+    
+    await opportunity.save();
+    res.status(201).json({ message: 'Opportunity created', opportunity });
+  } catch (err) {
+    console.error("Create Opp Error:", err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Company gets their own job postings
 app.get('/company/opportunities', authenticate, async (req, res) => {
   try {
@@ -521,6 +648,55 @@ app.delete('/company/opportunities/:id', authenticate, async (req, res) => {
     if (req.user.role !== 'recruiter') return res.status(403).json({ message: 'Forbidden' });
     const opp = await Opportunity.findOneAndDelete({ _id: req.params.id, company: req.user.id });
     if (!opp) return res.status(404).json({ message: 'Opportunity not found' });
+    
+    // Cascade delete applications
+    await Application.deleteMany({ opportunityId: req.params.id });
+    
+    res.json({ message: 'Opportunity deleted' });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// TPO creates a new job posting
+app.post('/tpo/opportunities', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'tpo') return res.status(403).json({ message: 'Forbidden' });
+    const { title, companyName, role, package: jobPackage, description, location, deadline, minGpa, department, skills } = req.body;
+    
+    const opportunity = new Opportunity({
+      companyName, // TPO provides company name manually
+      postedBy: 'tpo',
+      creatorId: req.user.id,
+      title,
+      role,
+      package: jobPackage,
+      description,
+      location,
+      deadline,
+      minGpa,
+      department,
+      skills
+    });
+    
+    await opportunity.save();
+    res.status(201).json({ message: 'Opportunity created', opportunity });
+  } catch (err) {
+    console.error("TPO Create Opp Error:", err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// TPO deletes a job posting
+app.delete('/tpo/opportunities/:id', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'tpo') return res.status(403).json({ message: 'Forbidden' });
+    const opp = await Opportunity.findByIdAndDelete(req.params.id);
+    if (!opp) return res.status(404).json({ message: 'Opportunity not found' });
+    
+    // Cascade delete applications
+    await Application.deleteMany({ opportunityId: req.params.id });
+    
     res.json({ message: 'Opportunity deleted' });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
@@ -566,6 +742,18 @@ app.get('/student/opportunities', authenticate, async (req, res) => {
     });
     res.json({ opportunities: eligible });
   } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// TPO: Get applications for a specific opportunity
+app.get('/tpo/opportunities/:id/applications', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'tpo') return res.status(403).json({ message: 'Forbidden' });
+    const applications = await Application.find({ opportunityId: req.params.id }).populate('student');
+    res.json({ applications });
+  } catch (err) {
+    console.error("Get Apps Error:", err);
     res.status(500).json({ message: 'Server error' });
   }
 });
