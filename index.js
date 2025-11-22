@@ -602,7 +602,7 @@ app.post('/company/opportunities', authenticate, async (req, res) => {
       location,
       deadline,
       minGpa,
-      department,
+      minGpa,
       skills
     });
     
@@ -675,7 +675,7 @@ app.post('/tpo/opportunities', authenticate, async (req, res) => {
       location,
       deadline,
       minGpa,
-      department,
+      minGpa,
       skills
     });
     
