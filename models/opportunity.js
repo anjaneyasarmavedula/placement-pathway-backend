@@ -12,7 +12,7 @@ const OpportunitySchema = new mongoose.Schema({
   location: { type: String },
   deadline: { type: Date },
   minGpa: { type: Number, default: 0 },
-  department: { type: String }, // e.g., CSE, ECE, etc.
+  minGpa: { type: Number, default: 0 },
   skills: { type: [String], default: [] },
   createdAt: { type: Date, default: Date.now },
 });

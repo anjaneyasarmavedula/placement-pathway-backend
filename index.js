@@ -589,7 +589,7 @@ app.post('/tpo/verify-student/:id', authenticate, async (req, res) => {
 app.post('/company/opportunities', authenticate, async (req, res) => {
   try {
     if (req.user.role !== 'recruiter') return res.status(403).json({ message: 'Forbidden' });
-    const { title, role, package: jobPackage, description, location, deadline, minGpa, department, skills } = req.body;
+    const { title, role, package: jobPackage, description, location, deadline, minGpa, skills } = req.body;
     
     const opportunity = new Opportunity({
       company: req.user.id,
@@ -662,7 +662,7 @@ app.delete('/company/opportunities/:id', authenticate, async (req, res) => {
 app.post('/tpo/opportunities', authenticate, async (req, res) => {
   try {
     if (req.user.role !== 'tpo') return res.status(403).json({ message: 'Forbidden' });
-    const { title, companyName, role, package: jobPackage, description, location, deadline, minGpa, department, skills } = req.body;
+    const { title, companyName, role, package: jobPackage, description, location, deadline, minGpa, skills } = req.body;
     
     const opportunity = new Opportunity({
       companyName, // TPO provides company name manually
@@ -733,7 +733,6 @@ app.get('/student/opportunities', authenticate, async (req, res) => {
     // Filter by eligibility
     const eligible = allOpportunities.filter(opp => {
       if (opp.minGpa && Number(student.gpa) < opp.minGpa) return false;
-      if (opp.department && opp.department !== 'any' && opp.department !== student.department) return false;
       if (opp.skills && opp.skills.length > 0) {
         const hasSkill = opp.skills.some(skill => student.skills.includes(skill));
         if (!hasSkill) return false;
